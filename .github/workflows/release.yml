@@ -74,7 +74,15 @@ jobs:
         run: |
           set -e
           git lfs install --local
-          git lfs pull --include="base/base-usr-${{ matrix.abi }}.tar.xz,base/base-dsh.tar.xz"
+          if ! git lfs pull --include="base/base-usr-${{ matrix.abi }}.tar.xz,base/base-dsh.tar.xz"; then
+            echo "LFS objects absent on this fork (fork does not copy LFS objects); falling back to upstream LFS media URLs (identical pinned bytes)."
+            for f in base-dsh.tar.xz base-usr-${{ matrix.abi }}.tar.xz; do
+              curl -sSL --fail --retry 5 --retry-delay 3 --max-time 900 \
+                "https://media.githubusercontent.com/media/kelai141/dsh-mobile-apk/main/base/$f" \
+                --output "base/$f"
+            done
+          fi
+          ls -l base/base-dsh.tar.xz base/base-usr-${{ matrix.abi }}.tar.xz
       # 守卫：按需拉取失败时工作区会留下约 130 字节的 pointer 文本——它「看起来是个文件」，
       # 能被 cp/tar 读到，失败会以「tar 解压出错」之类难懂的下游症状出现。这里在源头判红。
       - name: 断言底座确实已落地（拒绝 LFS pointer 冒充文件）
