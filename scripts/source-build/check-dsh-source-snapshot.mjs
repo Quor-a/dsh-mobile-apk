@@ -23,7 +23,6 @@ import { checkDshRuntimeDependencies } from './check-dsh-runtime-dependencies.mj
 import { checkAndroidNativeRuntimePackages } from './check-android-native-runtime-packages.mjs'
 import { checkPresetCarriers } from './preset-carriers.mjs'
 import { collectPhysicalFiles, matchesPatchTarget, enginePatchTargets, verifyCanonicalEnginePatch } from './reconcile-engine-patch-copies.mjs'
-import { readHarnessIdentity } from './harness-identity.mjs'
 
 const snapshotArg = process.argv[2]
 if (!snapshotArg) {
@@ -36,7 +35,7 @@ const sourceBuildRoot = resolve('.deploy-tmp/source-build')
 const sourceManifestPath = resolve('.deploy-tmp/engine-overlay/source-build-manifest.json')
 const reportPath = join(sourceBuildRoot, 'source-engine-snapshot-check.json')
 const packageCache = resolve('.deploy-tmp/engine-overlay')
-const { commit: expectedCommit, version: expectedVersion } = readHarnessIdentity()
+const expectedCommit = '9c2670d3bce5275e0d1610272958121af87787bb'
 const packagePrefix = 'usr/lib/node_modules/@deepseek-ai/dsh'
 const overlayPath = join(sourceBuildRoot, 'engine-overlay.original.json')
 const overridePath = join(sourceBuildRoot, 'harness-vendor-overrides.json')
@@ -53,8 +52,8 @@ const within = (root, candidate) => {
 const sourceManifest = JSON.parse(readFileSync(sourceManifestPath, 'utf8'))
 if (sourceManifest.commit !== expectedCommit) throw new Error(`unexpected Harness source commit: ${sourceManifest.commit}`)
 const sourceOverlay = JSON.parse(readFileSync(overlayPath, 'utf8'))
-if (sourceOverlay.engineVersion !== expectedVersion || sourceOverlay.rootPackage?.version !== expectedVersion) {
-  throw new Error(`source snapshot overlay must target official ${expectedVersion}`)
+if (sourceOverlay.engineVersion !== '0.2.2-rc.5' || sourceOverlay.rootPackage?.version !== '0.2.2-rc.5') {
+  throw new Error('source snapshot overlay must target official 0.2.2-rc.5')
 }
 const expectedPackages = new Map(Object.entries(sourceOverlay.packages ?? {}).filter(([name]) => name.startsWith('@deepseek-ai/')))
 expectedPackages.set(sourceOverlay.rootPackage.name, sourceOverlay.rootPackage.version)
@@ -145,7 +144,7 @@ try {
     || canvasBytes[5] !== 1 || canvasBytes.readUInt16LE(18) !== 183) {
     throw new Error('Canvas Android module is not an AArch64 ELF file')
   }
-  const launcher = readFileSync('app/src/main/java/com/dsharnessmobile/shell/EngineManager.kt', 'utf8')
+  const launcher = readFileSync('app/src/main/java/com/ai/assistance/quro/dshmobile/EngineManager.kt', 'utf8')
   if (!launcher.includes('"--expose-internals"')) {
     throw new Error('the Android engine no longer exposes Node internals for the JavaScript loader fallback')
   }

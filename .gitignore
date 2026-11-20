@@ -66,3 +66,6 @@ D:/
 # 在主检出里跑同一条门禁，会因此拒绝打包。
 # 它们不是仓库内容，任何提交都不该带上；本地工作树卫生由开发者自理（`git worktree remove`）。
 _dsh-wt/
+
+# local verification logs
+gate-*.log

@@ -9,13 +9,10 @@ import shutil
 import subprocess
 import sys
 
-from harness_pin import read_harness_identity
-
-_IDENTITY = read_harness_identity()
-HARNESS_COMMIT = _IDENTITY.commit
+HARNESS_COMMIT = "9c2670d3bce5275e0d1610272958121af87787bb"
 
 PACKAGE_NAME = "@deepseek-ai/dsh-web-frontend"
-PACKAGE_VERSION = _IDENTITY.version
+PACKAGE_VERSION = "0.2.2-rc.5"
 EXPECTED_FILES = ["dist", "!dist/**/*.map", "!dist/preview.html", "!dist/preview"]
 
 
@@ -91,7 +88,7 @@ def main() -> None:
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source_root, text=True).strip()
     root_manifest = json.loads((source_root / "package.json").read_text(encoding="utf-8"))
     if commit != HARNESS_COMMIT or root_manifest.get("version") != PACKAGE_VERSION:
-        raise ValueError(f"preview pruning requires the official {PACKAGE_VERSION} source")
+        raise ValueError("preview pruning requires the official 0.2.2-rc.5 source")
     package_root = source_root / "apps" / "web"
     package_file = package_root / "package.json"
     package_bytes = package_file.read_bytes()

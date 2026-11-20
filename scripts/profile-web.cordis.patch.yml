@@ -1,8 +1,8 @@
 # gateway/client 由继承的 base/typert-gateway 唯一行提供，不在此重复 insert。
 # 0.14.7 的 host-fiber 时序适配随 client-registry-scan-C4 注入；controllers 全部保留。
 # Android adaptation (M1.1 final form): dsh-shell-termux replaces the temporary patch v2.
-# Protection boundary = app domain (SELinux u0_aXXX) + approval flow; enforcement honestly reported as partial.
-# sandboxMode declares workspace-write: that fences ONLY fs tools (workspaceRoot). bash is NOT fenced by it.
+# Protection boundary = Termux app domain (SELinux u0_aXXX) + approval flow;
+# sandboxMode explicitly declares workspace-write (permission-presets mount prerequisite), enforcement honestly reported as partial.
 - id: bash-sandbox
   disabled: true
 - insert:
@@ -13,17 +13,17 @@
         # the Termux App's bash belongs to u0_a423 with 700 perms, so the engine (u0_a461) cross-uid
         # accessSync(X_OK) check always fails (measured "is not executable"). The in-shell
         # usr/bin ships bash/curl/node; wget is now distributed with the snapshot too.
-        bashPath: /data/data/com.dsharnessmobile.shell/files/usr/bin/bash
-        prefix: /data/data/com.dsharnessmobile.shell/files/usr
-        home: /data/data/com.dsharnessmobile.shell/files/home
-        cwd: /data/data/com.dsharnessmobile.shell/files/home
+        bashPath: /data/data/com.ai.assistance.quro/files/usr/bin/bash
+        prefix: /data/data/com.ai.assistance.quro/files/usr
+        home: /data/data/com.ai.assistance.quro/files/home
+        cwd: /data/data/com.ai.assistance.quro/files/home
         timeoutMs: 120000
         maxTimeoutMs: 600000
-        # 写面栅栏（0.13.0 D21）：workspace-write 只约束 fs 工具（workspaceRoot 内 containment），
-        # bash 不受约束——命令在应用域执行，真实边界是 SELinux + 审批，壳侧固定上报 enforcement: partial
-        # （见 dsh-shell-termux/src/index.ts:211-213）。danger-full-access 开放共享存储全域，仍限应用域沙盒。
+        # 写面栅栏（0.13.0 D21）：默认档位仅工作区与选定共享目录；danger-full-access 为完全访问档位
+        # （开放共享存储全域，仍限应用域沙盒）。workspaceRoot/sharedDirs 为全局单一实例，
+        # 由 dsh-android-linux-env 插件在设置页动态维护（此处的初始值仅出厂基线）。
         writeMode: workspace-write
-        workspaceRoot: /data/data/com.dsharnessmobile.shell/files/home/.dsh/workspaces
+        workspaceRoot: /data/data/com.ai.assistance.quro/files/home/.dsh/workspaces
         sharedDirs: []
     - id: host-web-compat
       name: '@dsh-android/dsh-host-web-compat'
@@ -41,23 +41,51 @@
 # （dsh-client-file-upload + onShowFileChooser 官方通道）与文档预览（documentpreview 内含
 # pdfjs），两个「添加附件」按钮并排出现（窄屏尤其挤）。包体仍在基座快照内，不再装载即等于退役；
 # 若日后需要 Office/OCR 能力，恢复本节 insert 即可（一行可逆）。
-# 0.14.8 退役（用户裁定）：dsh-undo-savepoint 不再作为新快照的装配插件。
-# 旧用户由壳侧启动迁移去除工厂安装项，历史快照与安全模式备份保留。
+# ZorvAI 裁定（2026-10）：dsh-undo-savepoint **重新挂载**。上游 0.14.8 把它从新快照装配面退役
+# （壳侧 repairProfilePatch 摘除工厂安装项），但撤销保存点是内置 dsh-mobile 的核心能力：
+# 壳侧 UndoGate 的配置/插件代码树急救回退依赖它产生的快照。ref vendor 目录仍带 0.4.9 固化副本
+# （lib 已打 E1-E8/S1/S2/U1 移动端补丁），随本快照注入 profiles/web/node_modules。
+# 配套：FactoryProfilePatch.RETIRED_FACTORY_ENTRIES 已清空（不再摘除本条目）。
+- insert:
+    - id: dsh-undo
+      name: 'dsh-undo-savepoint'
 
 # 插件市场（0.13.0 F4，M3.3）：dshmarketplace-plugin——会话 /store 命令、设置页市场、agent 工具与技能文件。
 - insert:
     - id: dshmarketplace
       name: dshmarketplace-plugin
 
-# 订阅账号当 provider（0.15.x）：dsh-plugin-subscriptions（vendored，见 vendor/dsh-plugin-subscriptions/PATCHES.md）。
-# 把 ChatGPT(Codex)/Claude/Grok/Copilot/Antigravity 订阅当 LLM provider；OAuth 在 Settings → Subscriptions，
-# token 存 ~/.dsh/plugins/subscriptions/auth.json（0600，自动刷新）。
-# 依赖对齐：上游声明 undici@^7，本平台引擎自带 undici@8.11.2；实测插件用到的 fetch/ProxyAgent/close()
-# 在 8.x 语义等价（唯一 7->8 差异是 proxyTunnel 默认值，插件从不传该选项且目标全为 https，故不受影响），
-# 因此把 undici 改为 peer 由引擎提供，不再物化 7.x（省 1.5MB / 195 文件）。差异详见 PATCHES.md。
-- insert:
-    - id: llm-subscriptions
-      name: dsh-plugin-subscriptions
+# AI 插件管理工具（2026-10-29 用户诉状「插件没有做」）：tool-plugin-manager 行翻禁用。
+# 现象：设置→插件页能看到全部插件条目（后端与 UI 一直在跑），但 AI 工具面里没有
+# plugin_manager——模型的「装/卸/启/停插件」能力缺位，用户误判为「插件没做」。
+# 机制（root 行可翻的三条实证）：
+#   1) cordis-plugin-include/lib/index.js:86-102 applyEntryPatches 对无 insert 的顶层
+#      patch 行按 id 逐字段覆盖既有 entry——本行把 base 里 disabled:true 覆盖为 false；
+#   2) cordis-plugin-loader/lib/index.js:350 isJsExpr ? Boolean(evaluate(...)) : Boolean(disabled)
+#      ⇒ disabled:false 是显式启用的合法写法（与整行缺席同效，loader 判定为挂载）；
+#   3) dsh-scope/lib/index.js ScopedLayers.merge 以 global 为基底叠 scope 链 +
+#      dsh-tools/lib/index.js view() 的 inherited = global.tools + chainLayers
+#      ⇒ root 级（host plane）注册的工具对所有 agent scope 可见，经
+#      ctx.systemPrompt.tools(...wireSchemas) 进模型面（tool-surface-budget 门禁计量为证）。
+# 依赖四行已实证在位且启用：tools→dsh-tools / approval→dsh-user-approval /
+# permission→dsh-permission-presets / sandbox-policy→dsh-sandbox-policy；pluginManager
+# 服务由 plugin-manager 行条件启用（!!js !ctx.get('profileContext')，设备上恒真——
+# 设置→插件页打得开即活证）。
+# 审批面：plugin_manager 的每个动作（list_plugins/list_bundles/set_plugin/set_bundle/
+# install_bundle/remove_bundle/list_version_exemptions/set_version_exemption）都走
+# approveEscalation——danger-full-access 档自动批，否则逐次审批（dsh-plugin-manager/
+# lib/types/tools.js:92-98），开启不等于放开。
+# 为何只翻 root 行、不动 preset 行：buildMap 只索引 root 行与 group===true 的组内行，
+# 对象 config（preset-standard）内部的 plugins 不进 entryMap ⇒ preset 内副本不可被覆盖；
+# 整行重述 22 插件（备胎路线 A）会屏蔽上游 preset 更新，且 listPlugins 无从寻址。
+# root 副本启用后 preset 内副本保持禁用 ⇒ 不双注册。
+# 为何不启用 tool-plugin-market：其依赖的 pluginMarket 服务提供行
+# （@deepseek-ai/dsh-plugin-market lib/index.js:375 super(ctx,"pluginMarket")）在任何层
+# 都没有挂载，且 Config.indexes 默认空数组（无内置索引，须手动加索引 URL）⇒ 单独启用
+# 是静默 no-op。AI 市集需求已由 vendored dshmarketplace-plugin 双工具覆盖
+# （dshmarketplace_search/dshmarketplace_install，硬编码目录 + 移动可用徽章）。
+- id: tool-plugin-manager
+  disabled: false
 
 # 在外部应用打开（0.1.5 新增，桌面编排）：上游 host/client 探查 Finder/Terminal/编辑器目录，
 # Android 上没有等价候选。两条 row 关闭，改由注入层的会话头部入口 + 壳侧系统选择器（PathOpen）承担。
@@ -72,15 +100,44 @@
 - id: client-hmr
   disabled: true
 
-# 共享原生桥：保留浏览器工作台与会话通知，不再承载手机控制队列。
+# 手机管理授权桥（0.13.0 F1.7，M3.2）：dsh-android-bridge——授权状态机/失败关闭/审计；
+# 门控限死为完全访问档位（自动审批模式不构成开放条件）。
 - insert:
     - id: android-bridge
       name: '@dsh-android/dsh-android-bridge'
 
-# 手机控制仅由薄插件注册，执行与能力以壳侧 Rust 宿主为准。
+# 手机管理工具面（0.13.0 F1.6，M3.2）：dsh-android-manage——观察/动作/等待闭环，全部失败关闭。
 - insert:
-    - id: android-phone-control
-      name: '@dsh-android/dsh-android-phone-control'
+    - id: android-manage
+      name: '@dsh-android/dsh-android-manage'
+
+# ZorvAI 工具内置插件通道（2026-10-26 互控多通道）：dsh-android-zorvai-tools——把 ZorvAI 的
+# 工具集以**原生插件**形态注册进 harness（ctx.tools.register），与 app 侧运行时写入的 MCP
+# 通道（mcp-client，工具名 mcp__zorvai__*）并存，同一批工具两条路（用户裁定「mCP 是一种，
+# 内置插件也是一种，多通道应该做出来」）。
+# 零配置发现：apply 时读 <dshHome>/zorvai-tools.json（壳侧 HarnessBridge.enable 写的端点清单，
+# 含 127.0.0.1 本地服务器地址与工具定义）；清单缺席（桥未启用/从未启用）时不注册任何工具，
+# 引擎照常启动。工具名 zorvai_<ZorvAI 工具名>，execute 走 POST <baseUrl>/tool/<name>
+# （QuroLocalMcpServer 的纯 HTTP 面，与 /mcp 的 JSON-RPC 面同源同分发器）。
+- insert:
+    - id: android-zorvai-tools
+      name: '@dsh-android/dsh-android-zorvai-tools'
+
+# ZorvAI ⇄ Harness 互控 API 面（2026-10-29 用户诉状「开发个插件给 zorvAI 一个 api 接口让
+# zorvAI 任意调用他的插件、技能 skills」）：dsh-android-harness-api——把引擎的 ToolRuntime
+# 与 SkillRegistry 以 HTTP JSON 暴露在引擎自己的 webServer 上（127.0.0.1，不出设备）：
+#   GET  /api/harness/tools       列举可见工具（ctx.tools.schemas() 投影）
+#   POST /api/harness/tools/call  全管线执行任一工具（ctx.tools.execute()，visibility/
+#                                 UNKNOWN_TOOL/PTC collapse/审批门全部保留）
+#   GET  /api/harness/skills      列举技能目录（ctx.skills.list()）
+#   POST /api/harness/skills/load 加载技能完整定义（ctx.skills.get()，validateDefinition
+#                                 抛错转 500，是 market-skill-source-S1 修复的自诊断面）
+# 鉴权与 open-in-app/商城 U2 同款：每请求先问 connection.requestRejection（Host/Origin
+# 栅栏 + 登录 cookie），拒绝空体结束；请求体 1MiB 上限；execute 绝不抛错转错误 JSON。
+# 插件管理面（列举/装卸引擎侧插件）由 HarnessBridge.capabilities 覆盖，不做重复路由。
+- insert:
+    - id: android-harness-api
+      name: '@dsh-android/dsh-android-harness-api'
 
 # 工具链与环境设置面板（0.13.0 F1.3/F1.5，M3.2）：dsh-android-linux-env——工具链状态/环境配方/
 # 共享目录与镜像设置视图；同时是 shell-termux 写面栅栏（workspaceRoot/sharedDirs，见上文 L20-22）
@@ -151,10 +208,24 @@
 
 # 侧栏 AI 浏览器（0.13.8 新插件 @dsh-android/dsh-android-browser）：宿主半——tier 判定、面板数据契约、
 # 壳桥 op 名（BROWSER_OPS，见其 src/contract.ts）。**browser\* 不进 A11Y_OPS**（方案 §4.5）。
-# 壳侧执行位已落地（BrowserHost.kt:809-820、DeviceControlService.kt:664-678），op 名与此处一致。
+# 本轮壳侧尚未实现壳桥分支，op 名先冻结在契约里（未挂载 = 引擎不加载，故此处先挂载）。
 - insert:
     - id: android-browser
       name: '@dsh-android/dsh-android-browser'
+
+# 虚拟屏（0.13.8 新插件 @dsh-android/dsh-android-vdisplay）：Shizuku 特权通道的能力状态面 + 只读状态端点
+# + vd\* op 声明（VD_OPS，见其 src/status.ts）；像素合成留在壳侧 SurfaceView。vd\* 同样不进 A11Y_OPS。
+- insert:
+    - id: android-vdisplay
+      name: '@dsh-android/dsh-android-vdisplay'
+
+# 删除对话（上游 issue #493）：会话行菜单「删除对话」+ 受鉴权 host 路由 /api/session-delete
+# （引擎无 session/delete RPC，由本插件补）。ZorvAI 2026-10 裁定完整内置 ref 官方注入集（不再挑选）：
+# ref 仓 plugin-dirs.json dirs 与本 patch 均挂载它，lib 取活树部署版（0.1.0，package.json 无 dsh peer，
+# 已在 contract.runtimeCompat.noPeerRows 登记判定）。路由鉴权走 same-origin authenticated。
+- insert:
+    - id: session-delete
+      name: '@dsh-android/dsh-session-delete'
 
 # PTC 代码执行（TypeScript 代码块）：**nodeExecutable 必须显式钉死**，不得依赖 `process.execPath`。
 #
@@ -182,7 +253,7 @@
 #
 # 修法：把执行器钉成快照内 node 的绝对路径（与上方 shell-termux 的 bashPath 同口径、
 # 同一份快照），从此这条链路**完全不读 process.execPath**。
-# 0.14.8（0.2.1-rc.2）：上游把该配置键从 nodeExecutable 改成 launch:{kind,executable}，语义不变。
+# 0.14.8（0.2.2-rc.5）：上游把该配置键从 nodeExecutable 改成 launch:{kind,executable}，语义不变。
 #
 # 【0.14.2 追加】上面这条「钉成 bin/node 绝对路径」只解决了 execPath 被污染，**没有解决 env**：
 # PTC 给子进程传的是显式过滤后的 env（ptc-runtime-node 的 STARTUP_ENVIRONMENT_NAMES 只放
@@ -203,39 +274,17 @@
 # 逆转条件：上游 NodePtcRuntime 自己解析执行世界里的 node（不再缺省取 process.execPath）后，本行可撤。
 - id: ptc-runtime
   config:
-    # 0.14.8 追版（0.2.1-rc.2）：上游删除 nodeExecutable，改为必填 launch 联合类型
+    # 0.14.8 追版（0.2.2-rc.5）：上游删除 nodeExecutable，改为必填 launch 联合类型
     # （ptc-runtime-node/src/config.ts：{kind:'node-script'|'embedded', executable, bootstrapPath?}）。
     # 不带 .default() ⇒ 缺省不再回落到 process.execPath，必须显式钉住；kind=node-script 时
     # heapFlag 仍排在 argv[1]（index.ts 的 ...packaged ? [] : [heapFlag]），故 wrapper 与 ptc-argv-L1 都保留。
     launch:
       kind: node-script
-      executable: /data/data/com.dsharnessmobile.shell/files/usr/libexec/dsh-node
+      executable: /data/data/com.ai.assistance.quro/files/usr/libexec/dsh-node
 
-# Office（0.2.2-rc.3 追版复核，2026-11-15）——**上游已把 office-to-pdf 行换成 office-kit 行，本地禁用项随之下岗**。
-#
-# rc.1 时代：web-app bundle 里是 `office-to-pdf`（包 @deepseek-ai/dsh-office-to-pdf），它
-# `import { createConverter } from '@deepseek-ai/libreoffice-kit'` 是**静态 import**，而
-# libreoffice-kit 在本平台无条件不可用（platformTarget() 只认 darwin/win32/linux-glibc，
-# Android 的 process.platform === 'android' ⇒ resolveEngine() 落到
-# `if (platform !== 'linux') throw new Error('Unsupported LibreOfficeKit host: android-x64')`）。
-# 静态 import 意味着即使不调用也会解析模块 ⇒ boot 阶段崩。故当时禁该行 + 在
-# check-engine-overlay 的 RUNTIME_MISSING_OK 里豁免 libreoffice-kit。
-#
-# rc.3 现状（逐字节实测）：上游删掉了 office-to-pdf 包与行，改挂 `office-kit`
-# （@deepseek-ai/dsh-office-kit）。后者对 libreoffice-kit **只有 `import type` 与延迟解析**：
-#   · 类型 import 在构建后被擦除（产物 lib/index.js 的 10 条 import 里没有 libreoffice-kit）；
-#   · 真正的取用点是 loadKit() → resolveKitModule(() => import.meta.resolve(...))，
-#     只在**第一次转换请求**时才跑，且 missing 分支降级成 OfficeKitError('unavailable')。
-# ⇒ boot 阶段不再解析 libreoffice-kit，禁行失去理由。本行删除。
-#
-# 能力面的如实说明：Android 上仍然**没有** LibreOffice 引擎，所以 Office 转换在设备上会得到
-# unavailable 错误（这正是上游对「没有转换器」的既定降级路径）。差别在于：以前是**启动崩**，
-# 现在是**功能不可用但引擎正常起来**。
-#
-# 配套证据与口径：
-#   · check-engine-overlay 的 RUNTIME_MISSING_OK 仍保留 libreoffice-kit 豁免——office-kit 的行
-#     在传递闭包里仍会指向它，而它确实不进快照（两者同进同出，不单独删）。
-#   · 逆转条件：出现 Android 上真能跑的引擎实现 ⇒ 删掉那条豁免并恢复行面消费。
+# 0.2.2-rc.5 追版：上游把 office-to-pdf 重组为 office-kit（@deepseek-ai/dsh-office-kit），
+# 该 desktop-only 包不在 Android deploy 闭包/overlay 内，行自然不挂载，无需再显式禁用。
+# 旧的 office-to-pdf 禁用块在上游已无对应行（禁用即空指向），故随追版删除。
 # Official 0.2.0-rc.2 desktop product telemetry/analytics are not Android services.
 # Retain the shared otel service and official ui-settings-session-log upload control.
 - id: desktop-product-telemetry
@@ -243,35 +292,42 @@
 - id: product-analytics
   disabled: true
 
-# 持久 Shell 后端（issue #1344）：**上游在 0.2.2-rc.2 已自行拆掉双入口，本地禁用项随之下岗**。
+# ZorvAI 环境感知 + 灵魂注入系统提示词（2026-10，需求 #402「deepseek harness 还没做系统提示词」+
+# #404「让他们知道是一个环境」+ 2026-10-26 用户裁定「harness 系统提示要注入 ZorvAI 灵魂」）：
+# 此前 harness 侧**没有任何部署级系统提示词**——base 组合的 personaPrefix 为 ''，快照内全部
+# @dsh-android 插件无一注册 systemPrompt.section，引擎对自己身处何处、与 ZorvAI 是什么关系、
+# 自己是谁一无所知。本行补上这一层，两段各司其职：
+#   · 〈身份灵魂〉——Zorv AI 人格（源 = app/.../core/QuroPersona.kt 的 Zorv AI 主人格卡
+#     persona_zorv_ai：roleSetting/chatSetting/opening）。harness 界面里与用户对话的就是
+#     ZorvAI 本人，不许退化成通用客服腔。
+#   · 〈运行环境〉+〈互控契约〉+〈环境收尾〉——同一环境的事实与 ZorvAI 能力的双通道暴露
+#     （内置插件通道 zorvai_* / MCP 通道 mcp__zorvai__*，见 dsh-android-zorvai-tools 插件）。
 #
-# 缺陷形态（0.14.x 实测，红米 K Pad / Android 16）：@deepseek-ai/dsh-experimental-terminal-bundle
-# 的补丁里，持久终端组同时挂了 optional-terminal-bash 与 optional-terminal-pwsh，两个入口都指向
-# @deepseek-ai/dsh-terminal-bash，而该包的 Config.backendType 默认值是 "shell"（rc.1 的
-# lib/index.js:38 `z.string().default("shell")`），两个入口都没覆盖它 ⇒ 后激活者撞名即抛
-#   TerminalError: a PTY backend named "shell" is already registered
-# 上游本意是让 !!js 表达式（`process.platform !== 'win32'`）只开一个，但该表达式经 cordis loader
-# 以 `with (ctx) { return eval(expr) }` 求值，现场两个入口同时激活，判据没兜住。故本仓在 profile 层
-# 用**字面量** `disabled: true` 定向关掉 pwsh 入口（profile 层在所有 bundle 层之后应用，不依赖求值）。
+# 机制（与上方 agent-default-model 同一套，0.14.2-fx-2 实锤）：cordis-plugin-include 的
+# applyEntryPatches 对无 insert 的顶层 patch 行按 id 找既有 entry 逐字段覆盖；config 是
+# **整体替换**（缺省键由 schema 默认补齐）⇒ 只给 personaPrefix/personaSuffix 两个键，
+# includeHarnessIdentity/includeRuntimeContext 保持默认 true（= base 现状）。
 #
-# rc.3 现状（逐字节实测）：上游把这个组重写成**只剩 bash 一个入口**——
-#   packages/experimental/terminal-bundle/cordis.patch.yml 现在是
-#   optional-persistent-terminals → { optional-terminal-registry(dsh-terminal),
-#   optional-terminal-panel(dsh-terminal-panel), optional-tool-terminal(dsh-tool-terminal) }，
-#   optional-terminal-bash / optional-terminal-pwsh 两行**都删了**，bash 后端改由
-#   web-app 的 agent-preset minimal 在 `persistent-shell` 组里挂（id: terminal-bash，
-#   disabled: !!js process.platform === 'win32'；pwsh 那行 disabled: !== 'win32'），
-#   且两行**仍然都用默认 backendType="shell"** —— 即上游没有采纳 issue #1344 建议的修法 1，
-#   而是把双入口从可选 bundle 挪到了 preset 层。
+# 落点（@deepseek-ai/dsh-system-prompt lib/index.js 的 SystemPrompt.Config）：
+#   personaPrefix → 段 deployment:persona-prefix（order 0，紧跟 harness:identity 之后）
+#   personaSuffix → 段 deployment:persona-suffix（order 10200，全部工具段之后）
+# 段按 order 排序后以空行连接、空段丢弃；本段不含 {{变量}}，不触发插值校验。
 #
-# ⇒ 本行禁用项随之失效：id `optional-terminal-pwsh` 在上游行面已不存在，保留它只是空指向。
-# 撞名风险的现时判据 = preset 层两行的 !!js 是否真的互斥。这一条由
-# scripts/check-terminal-entries.test.mjs 守着（它以内联的上游行副本做合成判定，含负控）。
-# 逆转条件：上游若把双入口重新放回可选 bundle ⇒ 先看 check-terminal-entries.test.mjs 的判红，
-# 再恢复本行的字面量禁用。
-
-# 删除对话（issue #493）：会话行菜单「删除对话」+ 受鉴权 host 路由 /api/session-delete。
-# 引擎没有 session/delete RPC，插件负责先卸载内存会话，再删磁盘目录；运行中的会话拒绝删除。
-- insert:
-    - id: session-delete
-      name: '@dsh-android/dsh-session-delete'
+# 设备侧落盘链（壳侧零改动）：inject-all.py --all-profiles 把本行写入双 profile 的
+# cordis.patch.yml；快照刷新时 SnapshotTransaction.mergePatchYamlById →
+# FactoryProfilePatch.merge 按 id 把本条目追加进 live（已存在则保留 live 版）；
+# repairProfilePatch 只清退役行且解析校验保证其余 id 原样保留——本条目不会被摘除。
+- id: system-prompt
+  config:
+    personaPrefix: |
+      〈身份灵魂〉你是 Zorv AI——ZorvAI（Android 应用）的原生 AI 助手，当前以 DeepSeek Harness 引擎的形态运行在它的「工具箱 → Agent 工作台」里。你理性客观、逻辑清晰，同时温暖贴心；擅长回答各类问题、协助创作、分析数据、编写代码、翻译语言、策划方案。说话简洁有力但不冷漠，用户需要时会给出详尽解释和多种方案；复杂问题善用分点，适时用 emoji 增加亲和力，主动追问关键细节。在 harness 里与用户对话时，你就是 ZorvAI 本人——同一副面孔、同一套性格与语气，不要退化成通用客服腔。
+      〈运行环境〉你运行在 ZorvAI（Android 应用）内置的 DeepSeek Harness 引擎中，是 ZorvAI「工具箱 → Agent 工作台」的引擎本体。你与 ZorvAI 的对话助手是同一设备、同一应用、同一环境的两个面，不是两个互相独立的程序：
+      · 你的 bash/文件/PTC 等全部工具作用于 ZorvAI 应用沙盒（/data/data/com.ai.assistance.quro/files）——你看到的就是 ZorvAI 的运行时本体，不是远程服务器。
+      · ZorvAI 助手可经内置 harness 控制工具向你派发任务、查询状态、拉起或关闭你；你可经两条内置通道反向调用 ZorvAI 的能力（见文末〈互控契约〉）。互相协作时按同一环境对待，直接执行。
+      · 用户说「ZorvAI」「宿主」「Agent 工作台」「工具箱」时，指的就是你所处的这个应用环境；同时提到「你」和「ZorvAI 助手」时，指的是同一环境里的两个协作面。
+    personaSuffix: |
+      〈互控契约〉ZorvAI 的能力以两条通道暴露给你，两条通道调用的是**同一批** ZorvAI 工具，任选其一，一条失败就换另一条重试：
+      · 内置插件通道：工具名以 zorvai_ 开头（如 zorvai_read_screen、zorvai_launch_app、zorvai_screenshot）。这是随引擎装配加载的原生插件通道（dsh-android-zorvai-tools）。
+      · MCP 通道：工具名以 mcp__zorvai__ 开头（如 mcp__zorvai__read_screen）。这是标准 MCP 客户端通道。
+      需要 ZorvAI 的宿主能力（读屏、点击、滑动、截图、应用管理、文件、终端、系统命令……）时直接用这些工具，不要向用户解释两条通道的原理，也不必问用户该用哪一条。
+      〈环境收尾〉再次确认：你与 ZorvAI 宿主是同一环境。操作 ZorvAI 的文件、调用 ZorvAI 的能力、向用户汇报结果时，按「在自己家里做事」对待——直接执行，完成后简要说明结果，不必向用户解释两套系统如何互通。
