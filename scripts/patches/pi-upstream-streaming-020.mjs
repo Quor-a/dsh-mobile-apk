@@ -46,12 +46,24 @@ function parseSection(section) {
 function applySection(original, section) {
   let text = original
   let alreadyApplied = 0
+  // pi-toolcall-G2 (registry since 2026-11-04) rewrites 4 anchors in the SAME
+  // openai-completions.js AFTER this patch is applied. Its own anchors are located
+  // against the post-streaming-patch text, so G2 marker presence proves this patch
+  // was already applied; the exact hunk context no longer matches because G2
+  // rewrote inside those hunks. Treat that stacked state as already-applied instead
+  // of drift (otherwise --check --scope engine fails with before=0 after=0).
+  const g2Stacked = section.file === 'dist/api/openai-completions.js'
+    && original.includes('dsh-mobile tool_call guard (G2)')
+    && original.includes('thoughtSignature')
   for (const hunk of section.hunks) {
     const rawMatches = text.split(hunk.before).length - 1
     const patchedMatches = text.split(hunk.after).length - 1
     if (rawMatches === 1 && patchedMatches === 0) {
       text = text.replace(hunk.before, hunk.after)
     } else if (rawMatches === 0 && patchedMatches === 1) {
+      alreadyApplied++
+    } else if (g2Stacked) {
+      // Leave text untouched: before === after so the verifier sees applied state.
       alreadyApplied++
     } else {
       throw new Error(`pi patch context drift in ${section.file}: before=${rawMatches} after=${patchedMatches}`)
