@@ -141,8 +141,12 @@ jobs:
           git -C .deploy-tmp/deepseek-harness fetch --depth=1 origin "refs/tags/dsh-v$TAG:refs/tags/dsh-v$TAG"
           # A previous interrupted build may have modified tracked inputs before this checkout.
           # Reset only this dedicated source checkout; preserve ignored dependency caches.
+          # A fresh `clone --no-checkout` has no index yet, so `checkout -- .` would fail with
+          # "pathspec '.' did not match any file(s)"; only restore when HEAD already exists.
           test "$(realpath .deploy-tmp/deepseek-harness)" = "$(realpath .)/.deploy-tmp/deepseek-harness"
-          git -C .deploy-tmp/deepseek-harness checkout -- .
+          if git -C .deploy-tmp/deepseek-harness rev-parse --verify HEAD >/dev/null 2>&1; then
+            git -C .deploy-tmp/deepseek-harness checkout -- .
+          fi
           git -C .deploy-tmp/deepseek-harness clean -fdq
           git -C .deploy-tmp/deepseek-harness checkout --detach "$COMMIT"
           test "$(git -C .deploy-tmp/deepseek-harness rev-parse HEAD)" = "$COMMIT"
