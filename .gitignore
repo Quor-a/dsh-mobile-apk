@@ -42,3 +42,6 @@ out/
 
 # gh CLI 在 CWD 下落的设备状态（我这边只读调用产生，非仓库内容）
 .local/
+
+# 云端门禁要在根目录跑 unittest discover；subtree split 后路径去掉了 dshmobile/ 前缀
+!scripts/source-build/test_*.py
